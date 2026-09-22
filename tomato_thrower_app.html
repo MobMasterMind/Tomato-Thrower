@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tomato Thrower App</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Cropper.js CSS and JS via CDN -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            touch-action: manipulation; /* Better touch handling */
+        }
+
+        /* Projectile Animation Classes */
+        .projectile {
+            position: absolute;
+            pointer-events: none; /* Let clicks pass through to the container */
+            z-index: 50;
+            /* 
+               Different easing for top (Y) and left (X) creates a slight arc effect.
+               Transform handles scale and rotation.
+            */
+            transition: 
+                top 0.4s cubic-bezier(0.33, 1, 0.68, 1), 
+                left 0.4s linear, 
+                transform 0.4s ease-in;
+            transform-origin: center;
+        }
+
+        /* Splat Animation - 4 Seconds Fade Out */
+        .splat-anim {
+            animation: splatFadeOut 4s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+            pointer-events: none; 
+            z-index: 40;
+        }
+
+        @keyframes splatFadeOut {
+            0% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(0.5);
+            }
+            5% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1.1);
+            }
+            10% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            75% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(1.05);
+            }
+        }
+        
+        .splat-drip {
+            animation: dripDown 3s ease-in forwards;
+        }
+
+        @keyframes dripDown {
+            0% { transform: translateY(0); opacity: 1; }
+            80% { transform: translateY(20px); opacity: 1; }
+            100% { transform: translateY(30px); opacity: 0; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div id="app-container" class="bg-white rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col transition-all duration-500">
+        
+        <!-- Header -->
+        <header class="bg-gradient-to-r from-red-600 to-red-500 text-white p-6 text-center shadow-md z-10 relative">
+            <h1 class="text-3xl font-extrabold tracking-tight drop-shadow-sm">Tomato Thrower 🍅</h1>
+            <p class="text-red-100 mt-2 font-medium">Upload, frame, and let it fly!</p>
+        </header>
+
+        <div class="p-4 md:p-8 flex-grow flex flex-col items-center justify-center min-h-[450px]">
+            
+            <!-- Phase 1: Upload Section -->
+            <div id="upload-section" class="w-full flex flex-col items-center text-center space-y-6">
+                <div class="border-4 border-dashed border-gray-300 rounded-2xl p-12 w-full max-w-md hover:bg-red-50 hover:border-red-400 transition-all duration-300 cursor-pointer relative group">
+                    <input type="file" id="image-upload" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                    <div class="transform group-hover:scale-110 transition-transform duration-300">
+                        <svg class="w-20 h-20 mx-auto text-gray-400 group-hover:text-red-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                        </svg>
+                    </div>
+                    <p class="text-xl font-bold text-gray-700">Click or drag image here</p>
+                    <p class="text-sm text-gray-500 mt-2 font-medium">Supports JPG, PNG, WEBP</p>
+                </div>
+            </div>
+
+            <!-- Phase 2: Crop Section (Hidden initially) -->
+            <div id="crop-section" class="w-full flex-col items-center hidden space-y-6">
+                <div class="w-full max-h-[50vh] bg-gray-900 rounded-xl overflow-hidden border-2 border-gray-200 shadow-inner">
+                    <img id="crop-image" class="block max-w-full" src="" alt="To crop">
+                </div>
+                <div class="flex gap-4 w-full justify-center">
+                    <button id="cancel-crop-btn" class="px-6 py-3 rounded-full border-2 border-gray-300 text-gray-700 font-bold hover:bg-gray-100 transition-colors w-1/3 max-w-[150px]">
+                        Cancel
+                    </button>
+                    <button id="start-btn" class="px-8 py-3 rounded-full bg-red-600 text-white font-bold text-lg hover:bg-red-700 hover:shadow-lg hover:shadow-red-500/30 transition-all transform hover:-translate-y-1 w-2/3 max-w-[250px] flex justify-center items-center gap-2">
+                        Start Throwing 🎯
+                    </button>
+                </div>
+            </div>
+
+            <!-- Phase 3: Play Area (Hidden initially) -->
+            <div id="play-section" class="w-full flex-col items-center hidden space-y-5">
+                
+                <!-- Mode Selector -->
+                <div class="flex flex-wrap justify-center gap-3 bg-gray-50 p-3 rounded-2xl border border-gray-100 shadow-sm w-full">
+                    <button data-mode="tomato" class="mode-btn px-4 py-2 rounded-xl bg-red-100 text-red-700 border-2 border-red-500 font-bold transition-all shadow-sm transform scale-105">Tomato 🍅</button>
+                    <button data-mode="egg" class="mode-btn px-4 py-2 rounded-xl bg-white text-gray-700 border-2 border-transparent hover:bg-gray-100 font-bold transition-all">Egg 🥚</button>
+                    <button data-mode="water" class="mode-btn px-4 py-2 rounded-xl bg-blue-50 text-blue-700 border-2 border-transparent hover:bg-blue-100 font-bold transition-all">Water 💧</button>
+                    <button data-mode="pie" class="mode-btn px-4 py-2 rounded-xl bg-yellow-50 text-yellow-700 border-2 border-transparent hover:bg-yellow-100 font-bold transition-all">Pie 🥧</button>
+                    <button data-mode="mud" class="mode-btn px-4 py-2 rounded-xl bg-amber-50 text-amber-800 border-2 border-transparent hover:bg-amber-100 font-bold transition-all">Mud 🪨</button>
+                </div>
+                
+                <p class="text-red-500 font-bold animate-bounce text-sm uppercase tracking-wider">Tap the image to throw!</p>
+
+                <!-- The interactive container -->
+                <div id="play-container" class="relative overflow-hidden rounded-2xl shadow-2xl border-4 border-white cursor-crosshair w-full max-w-2xl bg-gray-900 select-none">
+                    <img id="final-image" src="" alt="Target" class="block w-full h-auto pointer-events-none">
+                </div>
+
+                <div class="pt-2">
+                    <button id="reset-btn" class="px-6 py-2 rounded-full bg-gray-200 text-gray-700 font-bold hover:bg-gray-300 transition-colors">
+                        Start Over
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const uploadSection = document.getElementById('upload-section');
+        const cropSection = document.getElementById('crop-section');
+        const playSection = document.getElementById('play-section');
+        
+        const imageUpload = document.getElementById('image-upload');
+        const cropImage = document.getElementById('crop-image');
+        const finalImage = document.getElementById('final-image');
+        const playContainer = document.getElementById('play-container');
+        
+        const startBtn = document.getElementById('start-btn');
+        const cancelCropBtn = document.getElementById('cancel-crop-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const modeBtns = document.querySelectorAll('.mode-btn');
+
+        let cropper = null;
+        let currentMode = 'tomato';
+
+        // Phase 1: Handle File Upload
+        imageUpload.addEventListener('change', (e) => {
+            const files = e.target.files;
+            if (files && files.length > 0) {
+                const file = files[0];
+                const reader = new FileReader();
+                
+                reader.onload = (event) => {
+                    // Transition sections
+                    uploadSection.classList.add('hidden');
+                    cropSection.classList.remove('hidden');
+                    cropSection.classList.add('flex');
+                    
+                    cropImage.src = event.target.result;
+                    
+                    if (cropper) cropper.destroy();
+                    
+                    cropImage.onload = () => {
+                        cropper = new Cropper(cropImage, {
+                            viewMode: 1, // Restrict crop box to canvas
+                            dragMode: 'move',
+                            autoCropArea: 0.9,
+                            restore: false,
+                            guides: true,
+                            center: true,
+                            highlight: false,
+                            cropBoxMovable: true,
+                            cropBoxResizable: true,
+                            toggleDragModeOnDblclick: false,
+                        });
+                    };
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        cancelCropBtn.addEventListener('click', () => {
+            if (cropper) {
+                cropper.destroy();
+                cropper = null;
+            }
+            imageUpload.value = '';
+            cropSection.classList.add('hidden');
+            cropSection.classList.remove('flex');
+            uploadSection.classList.remove('hidden');
+        });
+
+        // Phase 2: Start throwing (finalize crop)
+        startBtn.addEventListener('click', () => {
+            if (!cropper) return;
+            
+            const canvas = cropper.getCroppedCanvas({
+                maxWidth: 1024,
+                maxHeight: 1024,
+                imageSmoothingEnabled: true,
+                imageSmoothingQuality: 'high',
+            });
+            
+            finalImage.src = canvas.toDataURL('image/jpeg', 0.9);
+            
+            cropSection.classList.add('hidden');
+            cropSection.classList.remove('flex');
+            playSection.classList.remove('hidden');
+            playSection.classList.add('flex');
+        });
+
+        resetBtn.addEventListener('click', () => {
+            playSection.classList.add('hidden');
+            playSection.classList.remove('flex');
+            uploadSection.classList.remove('hidden');
+            imageUpload.value = '';
+            if (cropper) {
+                cropper.destroy();
+                cropper = null;
+            }
+            // Clear all active projectiles and splats
+            playContainer.querySelectorAll('.tomato-splat, .projectile').forEach(el => el.remove());
+        });
+
+        // Mode Selection UI Logic
+        modeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                modeBtns.forEach(b => {
+                    b.classList.remove('border-red-500', 'border-gray-400', 'border-blue-500', 'border-yellow-400', 'border-amber-600', 'shadow-sm', 'transform', 'scale-105', 'bg-white');
+                    b.classList.add('border-transparent');
+                });
+                
+                currentMode = btn.dataset.mode;
+                
+                btn.classList.remove('border-transparent');
+                btn.classList.add('shadow-sm', 'transform', 'scale-105');
+                
+                if (currentMode === 'tomato') btn.classList.add('border-red-500', 'bg-red-100');
+                if (currentMode === 'egg') btn.classList.add('border-gray-400', 'bg-white');
+                if (currentMode === 'water') btn.classList.add('border-blue-500', 'bg-blue-100');
+                if (currentMode === 'pie') btn.classList.add('border-yellow-400', 'bg-yellow-100');
+                if (currentMode === 'mud') btn.classList.add('border-amber-600', 'bg-amber-100');
+            });
+        });
+
+        // Phase 3: Interaction Handling
+        function handleInteraction(e) {
+            e.preventDefault(); // Prevent scrolling on touch
+            const rect = playContainer.getBoundingClientRect();
+            
+            // Handle both mouse and touch events
+            const touches = e.changedTouches ? e.changedTouches : [e];
+            
+            for(let i=0; i < touches.length; i++) {
+                const x = touches[i].clientX - rect.left;
+                const y = touches[i].clientY - rect.top;
+                throwProjectile(x, y);
+            }
+        }
+
+        playContainer.addEventListener('mousedown', handleInteraction);
+        playContainer.addEventListener('touchstart', handleInteraction, {passive: false});
+
+        function throwProjectile(targetX, targetY) {
+            // 1. Create the projectile element
+            const proj = document.createElement('div');
+            proj.classList.add('projectile');
+            
+            // Set SVG based on mode
+            proj.innerHTML = getProjectileSVG(currentMode);
+            
+            // 2. Initial position: Bottom Center of container
+            proj.style.left = '50%';
+            proj.style.top = '100%';
+            
+            // Initial transform (large scale, no rotation)
+            proj.style.transform = `translate(-50%, 0) scale(1.5) rotate(0deg)`;
+            
+            playContainer.appendChild(proj);
+
+            // 3. Force browser reflow so the starting position is registered
+            void proj.offsetWidth;
+
+            // 4. Determine rotation based on mode (pies shouldn't spin wildly)
+            const rotation = (currentMode === 'pie' || currentMode === 'water') ? 
+                             (Math.random() * 40 - 20) : // Slight wobble
+                             (720 + Math.random() * 360); // Crazy spin
+
+            // 5. Trigger the animation to target coordinates
+            proj.style.left = `${targetX}px`;
+            proj.style.top = `${targetY}px`;
+            proj.style.transform = `translate(-50%, -50%) scale(0.4) rotate(${rotation}deg)`;
+
+            // 6. Wait for the transition to finish (400ms matches CSS), then splat
+            setTimeout(() => {
+                if (playContainer.contains(proj)) {
+                    proj.remove(); // Remove the intact projectile
+                    createSplat(targetX, targetY); // Spawn the splat
+                }
+            }, 400); // 400ms flight time
+        }
+
+        function createSplat(x, y) {
+            const splat = document.createElement('div');
+            splat.classList.add('tomato-splat', 'absolute', 'splat-anim');
+            
+            const rotation = Math.random() * 360;
+            const scale = 0.8 + Math.random() * 0.5; // Random size variation
+            
+            splat.style.left = `${x}px`;
+            splat.style.top = `${y}px`;
+            
+            const innerDiv = document.createElement('div');
+            innerDiv.innerHTML = getSplatSVG(currentMode);
+            innerDiv.style.transform = `rotate(${rotation}deg) scale(${scale})`;
+            
+            if (currentMode === 'tomato') {
+                const hue = 350 + Math.random() * 20;
+                innerDiv.style.color = `hsl(${hue}, 90%, 45%)`;
+            }
+
+            splat.appendChild(innerDiv);
+            playContainer.appendChild(splat);
+
+            // Remove splat after animation finishes (4 seconds)
+            setTimeout(() => {
+                if (playContainer.contains(splat)) {
+                    splat.remove();
+                }
+            }, 4000);
+        }
+
+        function getProjectileSVG(mode) {
+            // These are the "intact" flying objects
+            switch(mode) {
+                case 'egg':
+                    return `
+                        <svg viewBox="0 0 100 100" class="w-16 h-16 drop-shadow-xl">
+                            <ellipse cx="50" cy="50" rx="35" ry="45" fill="#fdfbf7" stroke="#e5e5e5" stroke-width="2"/>
+                            <ellipse cx="40" cy="35" rx="10" ry="15" fill="#ffffff" opacity="0.6" transform="rotate(-30 40 35)"/>
+                        </svg>
+                    `;
+                case 'water':
+                    return `
+                        <svg viewBox="0 0 100 100" class="w-16 h-16 drop-shadow-xl">
+                            <path d="M50 10 Q65 40 70 65 A 25 25 0 0 1 30 65 Q35 40 50 10 Z" fill="#38bdf8"/>
+                            <path d="M45 10 Q50 5 55 10 L55 15 L45 15 Z" fill="#0284c7"/>
+                            <ellipse cx="40" cy="60" rx="5" ry="10" fill="#ffffff" opacity="0.5" transform="rotate(-20 40 60)"/>
+                        </svg>
+                    `;
+                case 'pie':
+                    return `
+                        <svg viewBox="0 0 100 100" class="w-24 h-24 drop-shadow-2xl">
+                            <!-- Tin foil base -->
+                            <ellipse cx="50" cy="65" rx="45" ry="20" fill="#cbd5e1" stroke="#94a3b8" stroke-width="3"/>
+                            <ellipse cx="50" cy="60" rx="40" ry="15" fill="#94a3b8"/>
+                            <!-- Cream mound -->
+                            <path d="M15 60 Q 20 20 50 10 Q 80 20 85 60 Z" fill="#ffffff"/>
+                            <circle cx="35" cy="40" r="15" fill="#f8fafc"/>
+                            <circle cx="65" cy="45" r="18" fill="#f1f5f9"/>
+                            <circle cx="50" cy="25" r="12" fill="#ffffff"/>
+                        </svg>
+                    `;
+                case 'mud':
+                    return `
+                        <svg viewBox="0 0 100 100" class="w-16 h-16 drop-shadow-xl">
+                            <path d="M50 15 Q 75 10 85 35 Q 95 65 75 85 Q 50 95 25 80 Q 5 60 15 35 Q 25 10 50 15 Z" fill="#78350f"/>
+                            <circle cx="35" cy="40" r="8" fill="#451a03" opacity="0.4"/>
+                            <circle cx="65" cy="60" r="12" fill="#451a03" opacity="0.3"/>
+                            <circle cx="70" cy="30" r="5" fill="#451a03" opacity="0.5"/>
+                        </svg>
+                    `;
+                case 'tomato':
+                default:
+                    return `
+                        <svg viewBox="0 0 100 100" class="w-16 h-16 drop-shadow-xl">
+                            <!-- Tomato body -->
+                            <circle cx="50" cy="55" r="40" fill="#ef4444"/>
+                            <circle cx="35" cy="40" r="10" fill="#f87171" opacity="0.6"/> <!-- highlight -->
+                            <!-- Stem -->
+                            <path d="M50 25 C 45 15, 30 15, 35 5 C 40 10, 48 15, 50 15 C 52 15, 60 10, 65 5 C 70 15, 55 15, 50 25 Z" fill="#22c55e"/>
+                            <circle cx="50" cy="15" r="4" fill="#166534"/>
+                        </svg>
+                    `;
+            }
+        }
+
+        function getSplatSVG(mode) {
+            // These are the splat shapes upon impact
+            switch(mode) {
+                case 'egg':
+                    return `
+                        <svg viewBox="0 0 100 100" class="w-24 h-24 drop-shadow-md">
+                            <path d="M 50 10 C 20 10 10 40 10 60 C 10 80 30 90 50 90 C 80 90 90 70 90 40 C 90 20 70 10 50 10 Z" fill="#ffffff" opacity="0.95" />
+                            <circle cx="55" cy="55" r="16" fill="#fbbf24" class="drop-shadow-sm" />
+                            <path d="M 30 85 c 5 10 10 5 15 15" stroke="#ffffff" stroke-width="6" stroke-linecap="round" fill="none" class="splat-drip"/>
+                            <path d="M 60 85 c 2 8 5 4 8 12" stroke="#ffffff" stroke-width="4" stroke-linecap="round" fill="none" class="splat-drip"/>
+                        </svg>
+                    `;
+                case 'water':
+                    return `
+                        <svg viewBox="0 0 100 100" class="w-32 h-32 text-cyan-400 fill-current opacity-70 mix-blend-multiply">
+                            <path d="M50 5 C 70 30 95 40 85 65 C 75 90 25 90 15 65 C 5 40 30 30 50 5 Z" />
+                            <circle cx="15" cy="20" r="5" />
+                            <circle cx="85" cy="25" r="6" />
+                            <circle cx="75" cy="85" r="7" class="splat-drip" />
+                            <circle cx="25" cy="80" r="5" class="splat-drip" />
+                            <circle cx="50" cy="90" r="4" class="splat-drip" />
+                        </svg>
+                    `;
+                case 'pie':
+                    return `
+                        <svg viewBox="0 0 100 100" class="w-40 h-40 drop-shadow-xl">
+                            <circle cx="50" cy="50" r="38" fill="#f8fafc" />
+                            <circle cx="35" cy="45" r="25" fill="#ffffff" />
+                            <circle cx="65" cy="55" r="28" fill="#e2e8f0" />
+                            <circle cx="50" cy="30" r="22" fill="#ffffff" />
+                            <circle cx="50" cy="70" r="25" fill="#ffffff" />
+                            <circle cx="80" cy="75" r="10" fill="#f8fafc" class="splat-drip"/>
+                            <circle cx="20" cy="80" r="8" fill="#ffffff" class="splat-drip"/>
+                        </svg>
+                    `;
+                case 'mud':
+                    return `
+                        <svg viewBox="0 0 100 100" class="w-28 h-28 drop-shadow-md text-amber-900 fill-current">
+                            <path d="M45 15 c 20-5 30 10 40 20 c 15 15 5 30 0 40 c -10 20 -35 25 -50 15 c -15-10 -25-30 -15 -45 c 10-15 15-25 25 -30 z" />
+                            <circle cx="15" cy="25" r="6" />
+                            <circle cx="85" cy="35" r="5" />
+                            <circle cx="65" cy="85" r="7" class="splat-drip" />
+                            <circle cx="35" cy="88" r="8" class="splat-drip" />
+                        </svg>
+                    `;
+                case 'tomato':
+                default:
+                    return `
+                        <svg viewBox="0 0 100 100" class="w-24 h-24 text-red-600 fill-current drop-shadow-md">
+                            <path d="M47.8 8.4c5.1-1.3 11.7.5 16.2 3.7 7.5 5.3 12.3 14.5 19.5 20.3 6.9 5.5 16.3 7.8 15.1 17.6-1 8.2-11.7 12.6-17.5 18.8-5.3 5.6-8.2 14.3-15.6 17.2-7.5 2.9-16.1-.7-23.8-2.6-9-2.3-19-3.7-25.2-10.7-6.2-7.1-7-18-5.9-27.4 1.1-9.6 4.7-18.7 11.2-25.7C28.2 12.6 37.6 11 47.8 8.4z" />
+                            <path d="M85 75 c 2-5 8-5 10 0 c 2 5-2 10-5 10 c-3 0-7-5-5-10 z" class="splat-drip"/>
+                            <path d="M20 20 c -2-4 -8-2 -6 3 c 2 5 6 4 6-3 z" />
+                            <path d="M15 65 c -3 2 -5 8 0 10 c 4 2 8 -2 6 -6 c -1 -3 -3 -6 -6 -4 z" class="splat-drip"/>
+                            <circle cx="90" cy="30" r="4" />
+                            <circle cx="35" cy="85" r="5" class="splat-drip"/>
+                        </svg>
+                    `;
+            }
+        }
+    </script>
+</body>
+</html>
